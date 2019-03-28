@@ -20,7 +20,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import misc.utils as utils
+# import misc.utils as utils
 from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_packed_sequence
 
 from .CaptionModel import CaptionModel
@@ -58,10 +58,16 @@ class AttModel(CaptionModel):
         self.att_feat_size = opt.att_feat_size
         self.att_hid_size = opt.att_hid_size
 
-        self.use_bn = getattr(opt, 'use_bn', 0)
+        self.use_bn = getattr(opt, 'use_bn', 0) # opt.use_bn
 
         self.ss_prob = 0.0 # Schedule sampling probability
 
+        # nn.Sequential(*args)是将里面的组件按照顺序连接起来
+        '''
+        nn.Embedding(num_embeddings, embedding_dim)
+            num_embeddings: embeddings dict 的大小
+            embedding_dim:  embedding vector 的大小
+        '''
         self.embed = nn.Sequential(nn.Embedding(self.vocab_size + 1, self.input_encoding_size),
                                 nn.ReLU(),
                                 nn.Dropout(self.drop_prob_lm))
@@ -81,15 +87,18 @@ class AttModel(CaptionModel):
         else:
             self.logit = [[nn.Linear(self.rnn_size, self.rnn_size), nn.ReLU(), nn.Dropout(0.5)] for _ in range(opt.logit_layers - 1)]
             self.logit = nn.Sequential(*(reduce(lambda x,y:x+y, self.logit) + [nn.Linear(self.rnn_size, self.vocab_size + 1)]))
+        # Context 2 attention
         self.ctx2att = nn.Linear(self.rnn_size, self.att_hid_size)
 
     def init_hidden(self, bsz):
+        # next() 返回迭代器的下一个项目
         weight = next(self.parameters())
         return (weight.new_zeros(self.num_layers, bsz, self.rnn_size),
                 weight.new_zeros(self.num_layers, bsz, self.rnn_size))
 
     def clip_att(self, att_feats, att_masks):
         # Clip the length of att_masks and att_feats to the maximum length
+        # mask是掩码数组，起到遮挡作用...
         if att_masks is not None:
             max_len = att_masks.data.long().sum(1).max()
             att_feats = att_feats[:, :max_len].contiguous()
@@ -119,19 +128,26 @@ class AttModel(CaptionModel):
         # pp_att_feats is used for attention, we cache it in advance to reduce computation cost
 
         for i in range(seq.size(1) - 1):
+            # 进行采样
             if self.training and i >= 1 and self.ss_prob > 0.0: # otherwiste no need to sample
                 sample_prob = fc_feats.new(batch_size).uniform_(0, 1)
                 sample_mask = sample_prob < self.ss_prob
+                # 若采样的mask矩阵每一个都是0，
                 if sample_mask.sum() == 0:
                     it = seq[:, i].clone()
                 else:
+                    # 返回所有非0值的下标索引并展开成1维
                     sample_ind = sample_mask.nonzero().view(-1)
                     it = seq[:, i].data.clone()
                     #prob_prev = torch.exp(outputs[-1].data.index_select(0, sample_ind)) # fetch prev distribution: shape Nx(M+1)
                     #it.index_copy_(0, sample_ind, torch.multinomial(prob_prev, 1).view(-1))
                     # prob_prev = torch.exp(outputs[-1].data) # fetch prev distribution: shape Nx(M+1)
                     prob_prev = torch.exp(outputs[:, i-1].detach()) # fetch prev distribution: shape Nx(M+1)
+                    # detach() 截断反向传播的梯度流，将tensor从计算图中分离出来
                     it.index_copy_(0, sample_ind, torch.multinomial(prob_prev, 1).view(-1).index_select(0, sample_ind))
+                    # 将torch.multinomial(prob_prev, 1).view(-1).index_select(0, sample_ind)的在第sample_ind处的行Copy到it里
+                    # torch.multinomial(prob_prev, 1)从prob_prev的每行选出一个值(通常是权重最大(数最大)的概率越大)
+                    # index_selext类似数据库的选择语句，0表显示行，选出sample_ind表示的一维下标的
             else:
                 it = seq[:, i].clone()          
             # break if all the sequences end
