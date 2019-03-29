@@ -276,7 +276,6 @@ class AdaAtt_lstm(nn.Module):
 
         self.i2h = nn.ModuleList([nn.Linear(self.rnn_size, (4+(use_maxout==True)) * self.rnn_size) for _ in range(self.num_layers - 1)])
         self.h2h = nn.ModuleList([nn.Linear(self.rnn_size, (4+(use_maxout==True)) * self.rnn_size) for _ in range(self.num_layers)])
-
         # Layers for getting the fake region
         if self.num_layers == 1:
             self.r_w2h = nn.Linear(self.input_encoding_size, self.rnn_size)
@@ -297,6 +296,7 @@ class AdaAtt_lstm(nn.Module):
             # the input to this layer
             if L == 0:
                 x = xt
+                # wx + v
                 i2h = self.w2h(x) + self.v2h(img_fc)
             else:
                 x = hs[-1]
@@ -305,8 +305,10 @@ class AdaAtt_lstm(nn.Module):
 
             all_input_sums = i2h+self.h2h[L](prev_h)
 
+            # dem = 1, start = 0, length(int) = 3 * self.rnn_size（选出列）
             sigmoid_chunk = all_input_sums.narrow(1, 0, 3 * self.rnn_size)
             sigmoid_chunk = F.sigmoid(sigmoid_chunk)
+
             # decode the gates
             in_gate = sigmoid_chunk.narrow(1, 0, self.rnn_size)
             forget_gate = sigmoid_chunk.narrow(1, self.rnn_size, self.rnn_size)
@@ -340,6 +342,17 @@ class AdaAtt_lstm(nn.Module):
         top_h = F.dropout(top_h, self.drop_prob_lm, self.training)
         fake_region = F.dropout(fake_region, self.drop_prob_lm, self.training)
 
+        # cat将[_.unsqueeze(0) for _ in hs]进行连接成一个tensor
+        '''
+        >>> x = torch.tensor([1, 2, 3, 4])
+        >>> torch.unsqueeze(x, 0)
+        tensor([[ 1,  2,  3,  4]])
+        >>> torch.unsqueeze(x, 1)
+        tensor([[ 1],
+                [ 2],
+                [ 3],
+                [ 4]])
+        '''
         state = (torch.cat([_.unsqueeze(0) for _ in hs], 0), 
                 torch.cat([_.unsqueeze(0) for _ in cs], 0))
         return top_h, fake_region, state
@@ -425,14 +438,21 @@ class TopDownCore(nn.Module):
         super(TopDownCore, self).__init__()
         self.drop_prob_lm = opt.drop_prob_lm
 
+        '''
+        设定att_lstm中，输入x的expected features数量为 opt.input_encoding_size + opt.rnn_size * 2
+        隐藏层特征数为 opt.rnn_size
+        '''
         self.att_lstm = nn.LSTMCell(opt.input_encoding_size + opt.rnn_size * 2, opt.rnn_size) # we, fc, h^2_t-1
         self.lang_lstm = nn.LSTMCell(opt.rnn_size * 2, opt.rnn_size) # h^1_t, \hat v
+        # 获取attent
         self.attention = Attention(opt)
 
     def forward(self, xt, fc_feats, att_feats, p_att_feats, state, att_masks=None):
         prev_h = state[0][-1]
+        # cat将这三个以dim=1方法连接起来
         att_lstm_input = torch.cat([prev_h, fc_feats, xt], 1)
 
+        # 由Top-Down Att LSTM输出h_att和c_att
         h_att, c_att = self.att_lstm(att_lstm_input, (state[0][0], state[1][0]))
 
         att = self.attention(h_att, att_feats, p_att_feats, att_masks)
@@ -443,6 +463,7 @@ class TopDownCore(nn.Module):
         h_lang, c_lang = self.lang_lstm(lang_lstm_input, (state[0][1], state[1][1]))
 
         output = F.dropout(h_lang, self.drop_prob_lm, self.training)
+        # torch.stack()将_att和_lang连接起来
         state = (torch.stack([h_att, h_lang]), torch.stack([c_att, c_lang]))
 
         return output, state
@@ -524,6 +545,7 @@ class DenseAttCore(nn.Module):
 
         return self.fusion2(torch.cat([h_0, h_1, h_2], 1)), [torch.cat(_, 0) for _ in zip(state_0, state_1, state_2)]
 
+# att = self.attention(h_att, att_feats, p_att_feats, att_masks)
 class Attention(nn.Module):
     def __init__(self, opt):
         super(Attention, self).__init__()
@@ -535,10 +557,14 @@ class Attention(nn.Module):
 
     def forward(self, h, att_feats, p_att_feats, att_masks=None):
         # The p_att_feats here is already projected
+
+        # numel()返回att_feats种的int元素个数
+        # //  表示除法
         att_size = att_feats.numel() // att_feats.size(0) // att_feats.size(-1)
         att = p_att_feats.view(-1, att_size, self.att_hid_size)
         
         att_h = self.h2att(h)                        # batch * att_hid_size
+        # expand_as 只能扩展维度数为1的维度，所以需要unsqueeze(1)
         att_h = att_h.unsqueeze(1).expand_as(att)            # batch * att_size * att_hid_size
         dot = att + att_h                                   # batch * att_size * att_hid_size
         dot = F.tanh(dot)                                # batch * att_size * att_hid_size
@@ -552,6 +578,7 @@ class Attention(nn.Module):
             weight = weight / weight.sum(1, keepdim=True) # normalize to 1
         att_feats_ = att_feats.view(-1, att_size, att_feats.size(-1)) # batch * att_size * att_feat_size
         att_res = torch.bmm(weight.unsqueeze(1), att_feats_).squeeze(1) # batch * att_feat_size
+        # squeeze(1)对size()中dim：1的去掉，其他不动
 
         return att_res
 
