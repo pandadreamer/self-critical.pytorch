@@ -25,6 +25,7 @@ class CaptionModel(nn.Module):
     # augments log-probabilities with diversity terms when number of groups > 1
 
     def forward(self, *args, **kwargs):
+        # get()到的这俩，只要这键值存在，就将值放到mode中，都不存在则为None
         mode = kwargs.get('mode', 'forward')
         if 'mode' in kwargs:
             del kwargs['mode']
