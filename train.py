@@ -69,6 +69,7 @@ def train(opt):
         best_val_score = infos.get('best_val_score', None)
 
     model = models.setup(opt).cuda()
+    # 将这些model并行执行
     dp_model = torch.nn.DataParallel(model)
 
     update_lr_flag = True
@@ -86,15 +87,31 @@ def train(opt):
     while True:
         if update_lr_flag:
                 # Assign the learning rate
+                '''
+                epoch：训练次数		假设有500次
+                learning_rate_decay_start：开始降低学习率的训练次数		假设是100
+                opt.learning_rate_decay_every：学习率每次减少的数			假设是0.01
+                opt.learning_rate_decay_rate: 学习率的减小率				假设
+				frac：指数
+				decay_factor 降低率
+                '''
             if epoch > opt.learning_rate_decay_start and opt.learning_rate_decay_start >= 0:
+            	# 超过阈值就改变当前的learning_rate(lr)
+            	# //表示返回不大于除法结果的最大整数
                 frac = (epoch - opt.learning_rate_decay_start) // opt.learning_rate_decay_every
+                # **表示^
                 decay_factor = opt.learning_rate_decay_rate  ** frac
                 opt.current_lr = opt.learning_rate * decay_factor
             else:
+            	# 未超过就不变
                 opt.current_lr = opt.learning_rate
+
+            # 将当前的学习率设为优化器的学习率
             utils.set_lr(optimizer, opt.current_lr)
+
             # Assign the scheduled sampling prob
             if epoch > opt.scheduled_sampling_start and opt.scheduled_sampling_start >= 0:
+            	# 执行SS来解决训练和预测的矛盾
                 frac = (epoch - opt.scheduled_sampling_start) // opt.scheduled_sampling_increase_every
                 opt.ss_prob = min(opt.scheduled_sampling_increase_prob  * frac, opt.scheduled_sampling_max_prob)
                 model.ss_prob = opt.ss_prob
@@ -111,8 +128,10 @@ def train(opt):
         start = time.time()
         # Load data from train split (0)
         data = loader.get_batch('train')
+        # 返回数据加载所用时间？
         print('Read data:', time.time() - start)
 
+        # Waits for all kernels in all streams on current device to complete.
         torch.cuda.synchronize()
         start = time.time()
 

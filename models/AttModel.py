@@ -11,7 +11,7 @@
 
 # TopDown is from Bottom-Up and Top-Down Attention for Image Captioning and VQA
 # https://arxiv.org/abs/1707.07998
-# However, it may not be identical to the author's architecture.
+# However, it may not be identical to the author's architecture.	
 
 from __future__ import absolute_import
 from __future__ import division
