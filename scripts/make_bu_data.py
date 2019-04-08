@@ -20,7 +20,13 @@ parser.add_argument('--output_dir', default='data/cocobu', help='output feature 
 
 args = parser.parse_args()
 
-csv.field_size_limit(sys.maxsize)
+maxInt = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(maxInt)
+        break
+    except OverflowError:
+        maxInt = int(maxInt/2)
 
 
 FIELDNAMES = ['image_id', 'image_w','image_h','num_boxes', 'boxes', 'features']
@@ -35,13 +41,13 @@ os.makedirs(args.output_dir+'_box')
 
 for infile in infiles:
     print('Reading ' + infile)
-    with open(os.path.join(args.downloaded_feats, infile), "r+b") as tsv_in_file:
+    with open(os.path.join(args.downloaded_feats, infile), "rt") as tsv_in_file:
         reader = csv.DictReader(tsv_in_file, delimiter='\t', fieldnames = FIELDNAMES)
         for item in reader:
             item['image_id'] = int(item['image_id'])
             item['num_boxes'] = int(item['num_boxes'])
             for field in ['boxes', 'features']:
-                item[field] = np.frombuffer(base64.decodestring(item[field]), 
+                item[field] = np.frombuffer(base64.decodestring(bytes(item[field],'utf-8')), 
                         dtype=np.float32).reshape((item['num_boxes'],-1))
             np.savez_compressed(os.path.join(args.output_dir+'_att', str(item['image_id'])), feat=item['features'])
             np.save(os.path.join(args.output_dir+'_fc', str(item['image_id'])), item['features'].mean(0))
