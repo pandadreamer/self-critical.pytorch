@@ -60,7 +60,7 @@ Download pre-extracted feature from [link](https://github.com/peteanderson80/bot
 For example:
 ```
 mkdir data/bu_data; cd data/bu_data
-wget https://storage.googleapis.com/bottom-up-attention/trainval.zip
+wget https://imagecaption.blob.core.windows.net/imagecaption/trainval_36.zip
 unzip trainval.zip
 
 ```
@@ -68,7 +68,7 @@ unzip trainval.zip
 Then:
 
 ```bash
-python script/make_bu_data.py --output_dir data/cocobu
+python scripts/make_bu_data.py --output_dir data/cocobu
 ```
 
 This will create `data/cocobu_fc`, `data/cocobu_att` and `data/cocobu_box`. If you want to use bottom-up feature, you can just follow the following steps and replace all cocotalk with cocobu.
